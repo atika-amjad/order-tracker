@@ -1,0 +1,11 @@
+# Keep build context lean and deterministic.
+node_modules
+npm-debug.log*
+.env
+.env.local
+.env.*.local
+tests
+.git
+.gitignore
+.npm-cache
+.npm-tmp

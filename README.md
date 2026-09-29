@@ -16,12 +16,12 @@ A full-stack web application that combines **four communication protocols** in a
 
 ---
 
-## 🔗 Live URLs (fill in after you deploy)
+## 🔗 Live URLs
 
 | Service | URL |
 |---------|-----|
-| **Backend (Render)** | `https://<your-backend-name>.onrender.com` |
-| **Frontend (Vercel)** | `https://<your-frontend>.vercel.app` |
+| **Backend (Dokploy)** | `https://order.dev-link.cloud` |
+| **Frontend (Dokploy)** | `https://order-tracker.dev-link.cloud` |
 | **GitHub repository** | `https://github.com/atika-amjad/order-tracker` |
 
 Deployment steps are in the **[Deployment](#-deployment)** section below.
@@ -75,7 +75,7 @@ order-tracker/
 ├── README.md                  ← this file
 ├── .gitignore  .nvmrc  package.json   (root convenience scripts)
 ├── backend/
-│   ├── package.json  .env.example  render.yaml  .nvmrc  server.js
+│   ├── package.json  .env.example  Dockerfile  .dockerignore  .nvmrc  server.js
 │   ├── src/
 │   │   ├── app.js             ← express app, CORS, route mounting
 │   │   ├── config.js          ← PORT, ALLOWED_ORIGINS
@@ -86,7 +86,7 @@ order-tracker/
 │   │   └── realtime/socketHandler.js
 │   └── tests/smoke.mjs        ← automated test for all 4 protocols
 └── frontend/
-    ├── package.json  vercel.json  .env.example  vite.config.js  index.html
+    ├── package.json  Dockerfile  nginx.conf  .dockerignore  .env.example  vite.config.js  index.html
     └── src/
         ├── main.jsx  App.jsx  config.js  styles.css
         ├── api/{rest,graphql,rpc,sse,socket}.js
@@ -302,86 +302,83 @@ Socket.io runs on the **same port** as the HTTP server. Rooms:
 
 ---
 
-## ☁️ Deployment
+## ☁️ Deployment (Dokploy — self-hosted server)
 
-The app is split into two deployable units: **backend → Render**, **frontend → Vercel**.
-Config files (`backend/render.yaml`, `frontend/vercel.json`) are already included.
+This project deploys as **two separate Dokploy Applications**, each built from
+its own Dockerfile, with Dokploy's bundled Traefik giving each its own subdomain
++ automatic HTTPS (Let's Encrypt):
 
-> ⚠️ **You must perform the actual deploy with your own accounts** — I cannot
-> access Render/Vercel/GitHub. The steps below are copy-paste ready. After
-> deploying, paste the live URLs into the table at the top of this README.
+| App | Dockerfile | Domain | Port | Key env var |
+|-----|-----------|--------|------|-------------|
+| Backend | `backend/Dockerfile` | `order.dev-link.cloud` | `4000` | `ALLOWED_ORIGINS` (runtime) |
+| Frontend | `frontend/Dockerfile` | `order-tracker.dev-link.cloud` | `80` | `VITE_API_URL` (build-time) |
 
-### Step 0 — Push to a public GitHub repository
+> Traefik terminates TLS for both domains and proxies to the containers.
+> WebSockets and SSE work out of the box — Traefik streams them without
+> buffering. No nginx reverse proxy is needed in this two-domain setup; the
+> frontend's JS calls the backend subdomain directly over HTTPS.
 
+### Prerequisites
+- A Dokploy server running on your own VPS with a public IP.
+- Two DNS **A records** pointing at your server IP:
+  - `order.dev-link.cloud` → server IP
+  - `order-tracker.dev-link.cloud` → server IP
+- Ports 80/443 open on the server (Dokploy needs them for the Let's Encrypt
+  challenge and for incoming traffic).
+
+### Step 0 — Push to the public GitHub repo
+Already done: https://github.com/atika-amjad/order-tracker (keep it **Public** —
+a private repo = 0 marks). Future updates:
 ```bash
-# from the project root
-git init
-git add .
-git commit -m "CSC337 Lab 04: Real-Time Order Tracker & Live Support System"
-# create an empty PUBLIC repo on GitHub named "order-tracker", then:
-git branch -M main
-git remote add origin https://github.com/atika-amjad/order-tracker.git
-git push -u origin main
-# ⚠️ ensure the repo is PUBLIC — a private repo = 0 marks per the assignment.
+git push origin main
 ```
 
-### Step 1 — Deploy the backend to Render
-
-1. Go to <https://dashboard.render.com> → **New +** → **Web Service**.
-2. Connect your GitHub account and select the **`order-tracker`** repo.
-3. Render reads `backend/render.yaml`. Confirm:
-   - **Root Directory:** `backend`
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Plan:** Free
-4. Add an environment variable (Environment tab):
+### Step 1 — Create the backend Application in Dokploy
+1. Dokploy → **Applications** → **Create** → choose the **Dockerfile** source.
+2. Connect your GitHub and select the **`order-tracker`** repo, branch `main`.
+3. Set **Build Path / Source Directory** to `backend` (Dokploy builds
+   `backend/Dockerfile`).
+4. Set the exposed **Port** to `4000`.
+5. Attach the domain `order.dev-link.cloud` (Dokploy auto-creates the Traefik
+   route + the Let's Encrypt certificate).
+6. Add **Environment Variables**:
    - `NODE_ENV` = `production`
-   - `ALLOWED_ORIGINS` = *(leave empty for now — set in Step 3 after the frontend URL exists)*
-5. Click **Create Web Service**. Wait for the build + "Live" status.
-6. Note the backend URL, e.g. `https://order-tracker-backend.onrender.com`.
-7. Verify: open `https://<backend>.onrender.com/health` → `{"status":"ok"}`,
-   and `https://<backend>.onrender.com/graphql` → GraphiQL UI.
+   - `ALLOWED_ORIGINS` = `https://order-tracker.dev-link.cloud`
+7. **Deploy**. Watch the build logs; once "Live", verify:
+   `https://order.dev-link.cloud/health` → `{"status":"ok"}`.
 
-> Render's free tier spins down after inactivity; the first request after idle
-> may take ~30–60s to wake. That is expected (see [Notes](#-notes)).
+### Step 2 — Create the frontend Application in Dokploy
+1. **Applications** → **Create** → **Dockerfile** source → same repo/branch.
+2. Set **Build Path / Source Directory** to `frontend` (builds `frontend/Dockerfile`).
+3. Set the exposed **Port** to `80` (nginx inside the container).
+4. Attach the domain `order-tracker.dev-link.cloud`.
+5. Add a **Build Environment Variable** (must be present at BUILD time — Vite
+   bakes `VITE_API_URL` into the static bundle; a runtime-only var would NOT
+   affect it):
+   - `VITE_API_URL` = `https://order.dev-link.cloud`
+   > The Dockerfile already defaults the `ARG VITE_API_URL` to
+   > `https://order.dev-link.cloud`, so even if your Dokploy version only
+   > injects runtime vars, the build still produces a working bundle.
+6. **Deploy**. Once "Live", open `https://order-tracker.dev-link.cloud`.
 
-### Step 2 — Deploy the frontend to Vercel
-
-1. Go to <https://vercel.com> → **Add New…** → **Project**.
-2. Import the **`order-tracker`** repo. Vercel reads `frontend/vercel.json`. Set:
-   - **Root Directory:** `frontend`
-   - **Framework Preset:** Vite
-   - **Build Command:** `npm run build`
-   - **Output Directory:** `dist`
-3. Add an **Environment Variable** (Project → Settings → Environment Variables):
-   - `VITE_API_URL` = `https://order-tracker-backend.onrender.com` *(your Render URL)*
-4. Click **Deploy**. Once finished, note the URL, e.g.
-   `https://order-tracker.vercel.app`.
-
-### Step 3 — Lock down CORS (wire the two together)
-
-1. Back in Render, edit the backend's environment variable:
-   - `ALLOWED_ORIGINS` = `https://order-tracker.vercel.app` *(your Vercel URL)*
-2. Trigger a redeploy (or it applies on next service restart).
-3. Open the Vercel URL — the SSE dot (green) and WS dot (green) in the header
-   should light up; create an order and watch it appear in the AlertFeed.
-
-### Step 4 — Update the README live-URL table
-
-Paste your final URLs into the **Live URLs** table at the top of this file,
-commit, and push:
-```bash
-git add README.md && git commit -m "docs: add live deployment URLs" && git push
-```
+### Step 3 — Verify the two are wired together
+- On the frontend page, the **SSE** and **WS** status dots in the header should
+  be green.
+- **Shop** → place an order (REST or GraphQL). It should appear live in
+  **Orders → AlertFeed** via SSE, and updating its status should push a
+  WebSocket `order:statusUpdate`.
+- If the dots stay red, double-check the backend's `ALLOWED_ORIGINS` matches
+  `https://order-tracker.dev-link.cloud` exactly (no trailing slash), and that
+  the frontend was built with `VITE_API_URL=https://order.dev-link.cloud`.
 
 ---
 
 ## 🧪 Verifying the Live Deployment
 
-Once deployed, confirm each protocol against the **backend** Render URL:
+Confirm each protocol against the **backend** domain `https://order.dev-link.cloud`:
 
 ```bash
-BE=https://order-tracker-backend.onrender.com
+BE=https://order.dev-link.cloud
 curl $BE/health
 curl $BE/api/v1/catalog
 curl -X POST $BE/api/v1/orders -H "Content-Type: application/json" \
@@ -393,24 +390,29 @@ curl -X POST $BE/rpc -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"listOrders","id":1}'
 ```
 
-For WebSockets, open the Vercel frontend → **Live Support** tab in one window and
-the **Agent** tab in another; request and accept support, then chat.
+For WebSockets, open `https://order-tracker.dev-link.cloud` → **Live Support**
+in one window and the **Agent** tab in another; request and accept support,
+then chat.
 
 ---
 
 ## 📝 Notes
 
-- **In-memory store:** Data resets on every server restart/redeploy. This is
-  intentional for a lab demo and avoids DB provisioning on free tiers.
-- **Render free-tier cold starts:** The backend sleeps after ~15 min idle. The
-  first request wakes it (~30–60s). For a smoother grading experience, "ping"
-  the `/health` URL shortly before submitting.
-- **Mixed content:** Both services use HTTPS. Always set `VITE_API_URL` to the
-  `https://` Render URL (never `http://`), or browsers block SSE/WebSocket.
-- **Sticky sessions:** A single Render instance keeps WebSocket sessions stable.
-  Scaling to multiple instances would require a sticky-session load balancer or
-  a Redis adapter (out of scope for this lab).
-- **Node version:** `engines: node >=20`; `.nvmrc` pins `20` for both apps.
+- **In-memory store:** Data resets on every container restart/redeploy. This is
+  intentional for a lab demo and avoids DB provisioning.
+- **Self-hosted (Dokploy):** Both apps run on your own server behind Dokploy's
+  Traefik, which auto-provisions HTTPS via Let's Encrypt. No free-tier cold
+  starts — the app is always live (subject only to your server's uptime).
+- **Mixed content:** Both domains are HTTPS (Traefik). The frontend's
+  `VITE_API_URL` is the `https://` backend domain — never `http://`, or
+  browsers block SSE/WebSocket.
+- **CORS:** Set the backend `ALLOWED_ORIGINS` to exactly the frontend domain.
+  For local dev, `ALLOWED_ORIGINS=*` is fine.
+- **WebSocket/SSE through Traefik:** Supported natively. If an SSE stream ever
+  stalls in a custom reverse-proxy setup, ensure response buffering is off
+  (Traefik streams by default).
+- **Node version:** `engines: node >=20`; the Docker images use `node:20`;
+  `.nvmrc` pins `20` for local dev.
 
 ---
 

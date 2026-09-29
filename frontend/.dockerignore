@@ -1,0 +1,11 @@
+# Keep build context lean; node_modules/dist are produced inside the image.
+node_modules
+dist
+npm-debug.log*
+.env
+.env.local
+.env.*.local
+.git
+.gitignore
+.npm-cache
+.npm-tmp
