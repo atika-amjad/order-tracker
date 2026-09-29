@@ -22,7 +22,7 @@ A full-stack web application that combines **four communication protocols** in a
 |---------|-----|
 | **Backend (Render)** | `https://<your-backend-name>.onrender.com` |
 | **Frontend (Vercel)** | `https://<your-frontend>.vercel.app` |
-| **GitHub repository** | `https://github.com/<your-github-username>/order-tracker` |
+| **GitHub repository** | `https://github.com/atika-amjad/order-tracker` |
 
 Deployment steps are in the **[Deployment](#-deployment)** section below.
 
@@ -103,7 +103,7 @@ order-tracker/
 
 ```bash
 # 1. Clone
-git clone https://github.com/<your-github-username>/order-tracker.git
+git clone https://github.com/atika-amjad/order-tracker.git
 cd order-tracker
 
 # 2. Install dependencies for both apps
@@ -320,7 +320,7 @@ git add .
 git commit -m "CSC337 Lab 04: Real-Time Order Tracker & Live Support System"
 # create an empty PUBLIC repo on GitHub named "order-tracker", then:
 git branch -M main
-git remote add origin https://github.com/<your-github-username>/order-tracker.git
+git remote add origin https://github.com/atika-amjad/order-tracker.git
 git push -u origin main
 # ⚠️ ensure the repo is PUBLIC — a private repo = 0 marks per the assignment.
 ```
