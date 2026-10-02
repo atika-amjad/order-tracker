@@ -7,6 +7,12 @@ const bus = require('../eventBus');
 //  - 1-on-1 customer <-> support chat (per-room)
 //  - support request routing to agents
 function setupSockets(io) {
+  // Pending support requests not yet accepted, keyed by roomId.
+  // Persisting them server-side means an agent who joins the 'agents' room
+  // AFTER a customer requested still sees the request (the previous
+  // fire-and-forget broadcast to an empty room lost late requests).
+  const pendingRequests = new Map();
+
   io.on('connection', (socket) => {
     console.log(`[socket] connected ${socket.id}`);
 
@@ -40,7 +46,10 @@ function setupSockets(io) {
         text: text.trim(),
         ts: new Date().toISOString(),
       };
-      io.to(`chat:${roomId}`).emit('chat:message', msg);
+      // socket.to() broadcasts to everyone in the room EXCEPT the sender.
+      // The sender already shows its own message via an optimistic local
+      // add in the UI, so echoing back here would duplicate it.
+      socket.to(`chat:${roomId}`).emit('chat:message', msg);
     });
 
     socket.on('chat:typing', ({ roomId }) => {
@@ -56,6 +65,10 @@ function setupSockets(io) {
       socket.join('agents');
       socket.data.role = 'agent';
       socket.emit('support:agentsReady', { message: 'Joined the agents room' });
+      // Replay any pending requests so a late-joining agent sees them.
+      for (const req of pendingRequests.values()) {
+        socket.emit('support:request', req);
+      }
     });
 
     socket.on('support:request', ({ orderId, customerName, roomId }) => {
@@ -66,11 +79,15 @@ function setupSockets(io) {
         ts: new Date().toISOString(),
       };
       socket.join(`chat:${req.roomId}`);
+      // Persist so agents joining later still see it.
+      pendingRequests.set(req.roomId, { ...req, ownerId: socket.id });
       io.to('agents').emit('support:request', req);
       socket.emit('support:queued', { roomId: req.roomId });
     });
 
     socket.on('support:accept', ({ roomId }) => {
+      // A request is now being handled; remove it from the pending queue.
+      pendingRequests.delete(roomId);
       socket.join(`chat:${roomId}`);
       io.to(`chat:${roomId}`).emit('support:accepted', {
         roomId,
@@ -82,6 +99,11 @@ function setupSockets(io) {
 
     socket.on('disconnect', () => {
       console.log(`[socket] disconnected ${socket.id}`);
+      // Drop any pending requests owned by this socket so we don't leave
+      // orphaned requests that can never be fulfilled.
+      for (const [roomId, req] of pendingRequests.entries()) {
+        if (req.ownerId === socket.id) pendingRequests.delete(roomId);
+      }
     });
   });
 

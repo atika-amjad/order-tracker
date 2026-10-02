@@ -100,17 +100,30 @@ await (async () => {
   await reader.cancel();
 })();
 
-// 14. Socket.io: 1-on-1 chat ----------------------------------------------
+// 14. Socket.io: 1-on-1 chat (two sockets — sender is excluded from its own
+// broadcast, so the receiver must be a separate socket) ----------------
 await (async () => {
-  const s = io(BASE, { transports: ['websocket'] });
+  const customer = io(BASE, { transports: ['websocket'] });
+  const agent = io(BASE, { transports: ['websocket'] });
   const result = await new Promise((resolve) => {
     const timer = setTimeout(() => resolve('timeout'), 6000);
-    s.on('connect', () => s.emit('chat:join', { roomId: 'smoke-room', role: 'customer', name: 'Smoke' }));
-    s.on('chat:joined', () => s.emit('chat:message', { roomId: 'smoke-room', text: 'hello from smoke' }));
-    s.on('chat:message', (m) => { if (m.text === 'hello from smoke') { clearTimeout(timer); resolve('ok'); } });
+    let agentJoined = false;
+    agent.on('connect', () => agent.emit('chat:join', { roomId: 'smoke-room', role: 'agent', name: 'Agent' }));
+    agent.on('chat:joined', () => { agentJoined = true; });
+    agent.on('chat:message', (m) => {
+      if (m.text === 'hello from smoke') { clearTimeout(timer); resolve('ok'); }
+    });
+    customer.on('connect', () => customer.emit('chat:join', { roomId: 'smoke-room', role: 'customer', name: 'Smoke' }));
+    customer.on('chat:joined', () => {
+      // wait until the agent has joined the room too, then send.
+      const trySend = () => agentJoined
+        ? customer.emit('chat:message', { roomId: 'smoke-room', text: 'hello from smoke' })
+        : setTimeout(trySend, 50);
+      trySend();
+    });
   });
   assert('Socket.io chat:message round-trip', result === 'ok');
-  s.disconnect();
+  customer.disconnect(); agent.disconnect();
 })();
 
 // 15. Socket.io: live order status update ---------------------------------
